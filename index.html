@@ -1,148 +1,124 @@
 <!doctype html>
 <html lang="en">
-
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Weather Stations Map</title>
+  <meta charset="utf-8" />
+  <title>Weather Stations</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
-    <style>
-        html,
-        body {
-            height: 100%;
-            margin: 0;
-        }
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
 
-        #topbar {
-            padding: 10px;
-            display: flex;
-            gap: 8px;
-            align-items: center;
-        }
-
-        #map {
-            height: calc(100% - 52px);
-        }
-
-        input[type="text"] {
-            width: min(900px, 70vw);
-            padding: 8px;
-        }
-
-        button {
-            padding: 8px 12px;
-        }
-
-        #status {
-            font-family: system-ui, sans-serif;
-            font-size: 14px;
-            opacity: 0.8;
-        }
-    </style>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #controls { padding: 8px; }
+    #map { height: calc(100% - 44px); }
+    input { width: 80%; padding: 6px; }
+    button { padding: 6px 10px; }
+  </style>
 </head>
-
 <body>
-    <div id="topbar">
-        <input id="apiUrl" type="text" placeholder="Paste API URL that returns stations JSON…" />
-        <button id="loadBtn">Load</button>
-        <span id="status"></span>
-    </div>
-    <div id="map"></div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<div id="map"></div>
 
-    <script>
-        const statusEl = document.getElementById("status");
-        const apiUrlEl = document.getElementById("apiUrl");
-        const loadBtn = document.getElementById("loadBtn");
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-        const map = L.map("map").setView([0, 0], 2);
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            maxZoom: 19,
-            attribution: '&copy; OpenStreetMap contributors'
-        }).addTo(map);
+<script>
+  const map = L.map("map").setView([0, 0], 2);
 
-        const markersLayer = L.layerGroup().addTo(map);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "© OpenStreetMap contributors",
+    maxZoom: 19
+  }).addTo(map);
 
-        function setStatus(msg) { statusEl.textContent = msg; }
+  const layer = L.layerGroup().addTo(map);
 
-        // Try to interpret a station object with flexible field names
-        function getLatLon(feature) {
-  const coords = feature?.geometry?.coordinates;
-  if (!Array.isArray(coords) || coords.length < 2) return null;
+  loadData();
 
-  const lon = Number(coords[0]);
-  const lat = Number(coords[1]);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  function fToC(f) {
+    return (f - 32) * 5 / 9;
+  }
 
-  return [lat, lon]; // Leaflet wants [lat, lon]
-}
+  function getLatLon(feature) {
+    const c = feature?.geometry?.coordinates;
+    if (!Array.isArray(c) || c.length < 2) return null;
+    return [c[1], c[0]]; // [lat, lon]
+  }
+
+  // Linear gradient from blue (15°C) to red (30°C)
+  function tempToColor(tempC) {
+    if (tempC === null) return "#888";
+
+    const tMin = 15;
+    const tMax = 30;
+
+    // clamp outside range
+    const t = Math.min(tMax, Math.max(tMin, tempC));
+    const f = (t - tMin) / (tMax - tMin); // 0..1
+
+    const r = Math.round(255 * f);
+    const g = Math.round(64 * (1 - f));
+    const b = Math.round(255 * (1 - f));
+
+    return `rgb(${r},${g},${b})`;
+  }
+
+  async function loadData() {
+
+    layer.clearLayers();
 
 
-        function stationLabel(st) {
-            return st.name ?? st.stationName ?? st.id ?? st.stationId ?? "Station";
-        }
+    const features = await getData();
+    const points = [];
 
-        async function loadStations() {
-            const url = apiUrlEl.value.trim();
-            if (!url) return setStatus("Paste an API URL first.");
+    for (const f of features) {
+      const ll = getLatLon(f);
+      if (!ll) continue;
 
-            setStatus("Loading…");
-            markersLayer.clearLayers();
+      const p = f.properties || {};
+      const tempC = (typeof p.tempf === "number") ? fToC(p.tempf) : null;
+      const hum   = (typeof p.humidity === "number") ? p.humidity : null;
 
-            let data;
-            try {
-                const res = await fetch(url, {
-                    // If your endpoint needs headers, add them here:
-                    // headers: { "Authorization": "Bearer …" }
-                });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                data = await res.json();
-            } catch (e) {
-                setStatus(`Fetch failed: ${e.message}`);
-                return;
-            }
+      L.circleMarker(ll, {
+        radius: 9,
+        fillColor: tempToColor(tempC),
+        color: "#000",
+        weight: 1,
+        fillOpacity: 0.85
+      })
+      .bindPopup(
+        `<strong>${p.neighborhood ?? "Station"}</strong><br>
+         Temp: ${tempC !== null ? tempC.toFixed(1) : "—"} °C<br>
+         Humidity: ${hum !== null ? hum : "—"} %`
+      )
+      .addTo(layer);
 
-            // Accept either an array directly, or an object containing an array
-            const stations = data.features; // since you said it's always here
+      points.push(ll);
+    }
 
-            if (!stations) {
-                setStatus("JSON didn’t look like an array of stations. Check console.");
-                console.log("Response JSON:", data);
-                return;
-            }
+    if (points.length) {
+      map.fitBounds(points, { padding: [20, 20] });
+    }
+  }
 
-            const points = [];
-            let plotted = 0;
+  async function getData(){
+    const startX = 1879;
+    const startY = 1226;
 
-            for (const st of stations) {
-                const ll = getLatLon(st);
-                if (!ll) continue;
+    let features = [];
 
-                points.push(ll);
-                plotted++;
+    for(x=startX; x<=startX+2; x++){
+      for(y=startY; y<=startY+2; y++){
+        const url = `https://api.weather.com/v2/vector-api/products/614/features?x=${x}&y=${y}&lod=12&apiKey=e1f10a1e78da46f5b10a1e78da96f525&tile-size=512&time=1766398500000-1766399400000`;
+        const res = await fetch(url);
+        const data = await res.json();
+        features = features.concat(data.features);
+      }
+    }
+    return features;
+  }
+</script>
 
-                L.marker(ll)
-                    .bindPopup(`<strong>${stationLabel(st)}</strong><br/>${ll[0].toFixed(5)}, ${ll[1].toFixed(5)}`)
-                    .addTo(markersLayer);
-            }
-
-            if (!plotted) {
-                setStatus("No stations with lat/lon found. Check field names in JSON.");
-                console.log("Stations sample:", stations.slice(0, 3));
-                return;
-            }
-
-            setStatus(`Plotted ${plotted} stations.`);
-            const bounds = L.latLngBounds(points);
-            map.fitBounds(bounds.pad(0.2));
-        }
-
-        loadBtn.addEventListener("click", loadStations);
-    </script>
 </body>
-
 </html>
