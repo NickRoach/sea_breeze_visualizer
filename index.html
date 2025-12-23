@@ -384,9 +384,9 @@ function qToColor(q)         { return redToBlue(q, qMin, qMax); }
         })
         .bindPopup(
           `<strong>${p.neighborhood ?? f.id}</strong><br>
-           Temp: ${t !== null ? t.toFixed(1) : "—"} °C<br>
+          Spec. humidity: ${q !== null ? q.toFixed(1) : "—"} g/kg<br>
            Rel. humidity: ${h !== null ? h : "—"} %<br>
-           Spec. humidity: ${q !== null ? q.toFixed(1) : "—"} g/kg<br>
+           Temp: ${t !== null ? t.toFixed(1) : "—"} °C<br>
            Updated: ${
             p.validTime
               ? new Date(p.validTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
