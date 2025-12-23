@@ -9,11 +9,47 @@
   <style>
     html, body { height: 100%; margin: 0; }
     #map { height: 100%; }
+
+    #controls {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      background: rgba(255,255,255,0.95);
+      padding: 8px 10px;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      font-family: system-ui, sans-serif;
+      font-size: 14px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .modeBtn {
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1px solid #bbb;
+      background: #f3f3f3;
+      cursor: pointer;
+    }
+
+    .modeBtn.selected {
+      background: #111;
+      color: #fff;
+      border-color: #111;
+    }
   </style>
 </head>
 <body>
 
 <div id="map"></div>
+
+<div id="controls">
+  <button id="humBtn" class="modeBtn selected">Humidity</button>
+  <button id="tempBtn" class="modeBtn">Temp</button>
+</div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
@@ -24,14 +60,28 @@
     maxZoom: 19
   }).addTo(map);
 
-
   const layer = L.layerGroup().addTo(map);
 
-  const startX = 1879;
+  const startX = 1878;
   const startY = 1226;
 
   const WINDOW_MS = 15 * 60 * 1000;
   const cache = new Map();
+
+  let colorMode = "humidity"; // "humidity" | "temp"
+
+  const humBtn = document.getElementById("humBtn");
+  const tempBtn = document.getElementById("tempBtn");
+
+  function setMode(mode) {
+    colorMode = mode;
+    humBtn.classList.toggle("selected", mode === "humidity");
+    tempBtn.classList.toggle("selected", mode === "temp");
+    loadData();
+  }
+
+  humBtn.onclick = () => setMode("humidity");
+  tempBtn.onclick = () => setMode("temp");
 
   function fToC(f) { return (f - 32) * 5 / 9; }
 
@@ -42,20 +92,28 @@
   }
 
   function humidityToColor(h) {
-  if (typeof h !== "number") return "#888";
+    if (typeof h !== "number") return "#888";
+    const hMin = 50;   // red
+    const hMax = 95;   // blue
+    const v = Math.min(hMax, Math.max(hMin, h));
+    const f = (v - hMin) / (hMax - hMin);
+    const r = Math.round(255 * (1 - f));
+    const g = 0;
+    const b = Math.round(255 * f);
+    return `rgb(${r},${g},${b})`;
+  }
 
-  const hMin = 50;   // red
-  const hMax = 95;   // blue
-  const v = Math.min(hMax, Math.max(hMin, h));
-  const f = (v - hMin) / (hMax - hMin);
-
-  // red (255,0,0) → blue (0,0,255)
-  const r = Math.round(255 * (1 - f));
-  const g = 0;
-  const b = Math.round(255 * f);
-
-  return `rgb(${r},${g},${b})`;
-}
+  function tempToColor(t) {
+    if (typeof t !== "number") return "#888";
+    const tMin = 15, tMax = 30;
+    const v = Math.min(tMax, Math.max(tMin, t));
+    const f = (v - tMin) / (tMax - tMin);
+    // blue (cold) -> red (hot)
+    const r = Math.round(255 * f);
+    const g = 0;
+    const b = Math.round(255 * (1 - f));
+    return `rgb(${r},${g},${b})`;
+  }
 
   function floorToQuarterHour(ms) {
     const d = new Date(ms);
@@ -69,7 +127,7 @@
     if (cache.has(key)) return cache.get(key);
 
     let features = [];
-    for (let x = startX; x <= startX + 2; x++) {
+    for (let x = startX; x <= startX + 3; x++) {
       for (let y = startY; y <= startY + 2; y++) {
         const url =
           `https://api.weather.com/v2/vector-api/products/614/features` +
@@ -92,23 +150,16 @@
       const id = f?.id || f?.properties?.id;
       const vt = f?.properties?.validTime;
       if (!id || typeof vt !== "number") continue;
-      if (!f.properties?.humidity || typeof f.properties.humidity !== "number") continue;
-
-      // keep only readings in the requested 15-minute window
       if (vt < startMs || vt > endMs) continue;
-      
 
       const prev = byId.get(id);
-      if (!prev || vt > prev.properties.validTime) {
-        byId.set(id, f);
-      }
+      if (!prev || vt > prev.properties.validTime) byId.set(id, f);
     }
 
     return [...byId.values()];
   }
 
   async function loadData() {
-    // end time locked to :00, :15, :30, :45
     const end = floorToQuarterHour(Date.now());
     const start = end - WINDOW_MS;
 
@@ -123,12 +174,15 @@
       if (!ll) continue;
 
       const p = f.properties || {};
-      const t = typeof p.tempf === "number" ? fToC(p.tempf) : null;
-      const h = typeof p.humidity === "number" ? p.humidity : null;
+      const t = (typeof p.tempf === "number") ? fToC(p.tempf) : null;
+      const h = (typeof p.humidity === "number") ? p.humidity : null;
+
+      const fillColor =
+        (colorMode === "humidity") ? humidityToColor(h) : tempToColor(t);
 
       L.circleMarker(ll, {
         radius: 9,
-        fillColor: humidityToColor(h),
+        fillColor,
         color: "#000",
         weight: 0,
         fillOpacity: 0.85
@@ -136,12 +190,14 @@
       .bindPopup(
         `<strong>${p.neighborhood ?? f.id}</strong><br>
          Temp: ${t !== null ? t.toFixed(1) : "—"} °C<br>
-         Humidity: ${h} %`
+         Humidity: ${h !== null ? h : "—"} %`
       )
       .addTo(layer);
 
       pts.push(ll);
     }
+
+    if (pts.length) map.fitBounds(pts, { padding: [-20, -20] });
   }
 
   loadData();
