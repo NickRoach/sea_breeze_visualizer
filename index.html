@@ -91,6 +91,45 @@
     return [c[1], c[0]];
   }
 
+  // ---- OUTLIER REMOVAL (std dev) ----
+  const OUTLIER_K = 2.5; // keep values within mean ± K*sd
+
+  function meanSd(vals) {
+    const n = vals.length;
+    if (n < 2) return { mean: null, sd: null };
+    const mean = vals.reduce((a, b) => a + b, 0) / n;
+    const varPop = vals.reduce((a, b) => a + (b - mean) * (b - mean), 0) / n;
+    const sd = Math.sqrt(varPop);
+    return { mean, sd };
+  }
+
+  function filterOutliersByStd(features) {
+    const temps = [];
+    const hums = [];
+
+    for (const f of features) {
+      const p = f.properties || {};
+      if (typeof p.tempf === "number") temps.push(fToC(p.tempf));
+      if (typeof p.humidity === "number") hums.push(p.humidity);
+    }
+
+    const tStats = meanSd(temps);
+    const hStats = meanSd(hums);
+
+    const tLo = (tStats.mean != null && tStats.sd != null) ? tStats.mean - OUTLIER_K * tStats.sd : -Infinity;
+    const tHi = (tStats.mean != null && tStats.sd != null) ? tStats.mean + OUTLIER_K * tStats.sd :  Infinity;
+    const hLo = (hStats.mean != null && hStats.sd != null) ? hStats.mean - OUTLIER_K * hStats.sd : -Infinity;
+    const hHi = (hStats.mean != null && hStats.sd != null) ? hStats.mean + OUTLIER_K * hStats.sd :  Infinity;
+
+    return features.filter(f => {
+      const p = f.properties || {};
+      const t = (typeof p.tempf === "number") ? fToC(p.tempf) : null;
+      const h = (typeof p.humidity === "number") ? p.humidity : null;
+      if (typeof t !== "number" || typeof h !== "number") return false;
+      return (t >= tLo && t <= tHi && h >= hLo && h <= hHi);
+    });
+  }
+
   // dynamic ranges, recomputed each load to maximize contrast
   let tempMin = null, tempMax = null;
   let humMin = null, humMax = null;
@@ -112,46 +151,27 @@
     if (!Number.isFinite(humMin)  || !Number.isFinite(humMax))  { humMin  = null; humMax  = null; }
   }
 
-  // lowest -> blue, highest -> red (max contrast)
-  function blueRedColor(v, vMin, vMax) {
-  if (typeof v !== "number" || vMin == null || vMax == null) return "#888";
-  if (vMax === vMin) return "rgb(128,0,128)";
-
-  const f = (v - vMin) / (vMax - vMin); // 0..1
-
-  // low = red, high = blue
-  const r = Math.round(255 * (1 - f));
-  const g = 0;
-  const b = Math.round(255 * f);
-
-  return `rgb(${r},${g},${b})`;
-}
-
-
   // TEMP: lowest = blue, highest = red
-function tempToColor(t) {
-  if (typeof t !== "number" || tempMin == null || tempMax == null) return "#888";
-  if (tempMax === tempMin) return "rgb(128,0,128)";
+  function tempToColor(t) {
+    if (typeof t !== "number" || tempMin == null || tempMax == null) return "#888";
+    if (tempMax === tempMin) return "rgb(128,0,128)";
+    const f = (t - tempMin) / (tempMax - tempMin); // 0..1
+    const r = Math.round(255 * f);
+    const g = 0;
+    const b = Math.round(255 * (1 - f));
+    return `rgb(${r},${g},${b})`;
+  }
 
-  const f = (t - tempMin) / (tempMax - tempMin); // 0..1
-  const r = Math.round(255 * f);
-  const g = 0;
-  const b = Math.round(255 * (1 - f));
-  return `rgb(${r},${g},${b})`;
-}
-
-// HUMIDITY: lowest = red, highest = blue
-function humidityToColor(h) {
-  if (typeof h !== "number" || humMin == null || humMax == null) return "#888";
-  if (humMax === humMin) return "rgb(128,0,128)";
-
-  const f = (h - humMin) / (humMax - humMin); // 0..1
-  const r = Math.round(255 * (1 - f));
-  const g = 0;
-  const b = Math.round(255 * f);
-  return `rgb(${r},${g},${b})`;
-}
-
+  // HUMIDITY: lowest = red, highest = blue
+  function humidityToColor(h) {
+    if (typeof h !== "number" || humMin == null || humMax == null) return "#888";
+    if (humMax === humMin) return "rgb(128,0,128)";
+    const f = (h - humMin) / (humMax - humMin); // 0..1
+    const r = Math.round(255 * (1 - f));
+    const g = 0;
+    const b = Math.round(255 * f);
+    return `rgb(${r},${g},${b})`;
+  }
 
   function floorToQuarterHour(ms) {
     const d = new Date(ms);
@@ -206,7 +226,10 @@ function humidityToColor(h) {
     const start = end - WINDOW_MS;
 
     const bucket = await fetchFeatures(start, end);
-    const features = mostRecentPerStation(bucket, start, end);
+    const latest = mostRecentPerStation(bucket, start, end);
+
+    // remove outliers (temp + humidity) before computing min/max + drawing
+    const features = filterOutliersByStd(latest);
 
     computeRanges(features);
 
