@@ -235,10 +235,11 @@ function humidityToColor(h) {
         `<strong>${p.neighborhood ?? f.id}</strong><br>
          Temp: ${t !== null ? t.toFixed(1) : "—"} °C<br>
          Humidity: ${h !== null ? h : "—"} %<br>
-         <small>
-           Temp range: ${tempMin !== null ? tempMin.toFixed(1) : "—"}–${tempMax !== null ? tempMax.toFixed(1) : "—"} °C<br>
-           Hum range: ${humMin !== null ? humMin.toFixed(0) : "—"}–${humMax !== null ? humMax.toFixed(0) : "—"} %
-         </small>`
+         Updated: ${
+          p.validTime
+            ? new Date(p.validTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+            : "—"
+        }`
       )
       .addTo(layer);
 
